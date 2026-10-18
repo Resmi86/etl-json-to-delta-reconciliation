@@ -1,0 +1,79 @@
+
+name: Trigger Databricks Reconciliation
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trigger-databricks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Trigger and monitor Databricks Job
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+          DATABRICKS_JOB_ID: ${{ vars.DATABRICKS_JOB_ID }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          : "${DATABRICKS_HOST:?Missing DATABRICKS_HOST variable}"
+          : "${DATABRICKS_JOB_ID:?Missing DATABRICKS_JOB_ID variable}"
+          : "${DATABRICKS_TOKEN:?Missing DATABRICKS_TOKEN secret}"
+
+          HOST="${DATABRICKS_HOST%/}"
+
+          echo "Triggering Databricks reconciliation job..."
+
+          RESPONSE=$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            "${HOST}/api/2.2/jobs/run-now" \
+            --header "Authorization: Bearer ${DATABRICKS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "{\"job_id\": ${DATABRICKS_JOB_ID}}")
+
+          RUN_ID=$(jq -er '.run_id' <<< "$RESPONSE")
+          echo "Databricks run started."
+
+          for attempt in $(seq 1 60); do
+            STATUS=$(curl --fail-with-body --silent --show-error \
+              --get \
+              "${HOST}/api/2.2/jobs/runs/get" \
+              --header "Authorization: Bearer ${DATABRICKS_TOKEN}" \
+              --data-urlencode "run_id=${RUN_ID}")
+
+            LIFE_CYCLE=$(jq -r '.state.life_cycle_state // ""' <<< "$STATUS")
+            RESULT=$(jq -r '.state.result_state // ""' <<< "$STATUS")
+
+            echo "Attempt ${attempt}: ${LIFE_CYCLE} ${RESULT}"
+
+            if [[ "$LIFE_CYCLE" == "TERMINATED" ]]; then
+              if [[ "$RESULT" == "SUCCESS" ]]; then
+                echo "Databricks reconciliation job succeeded."
+                exit 0
+              fi
+
+              echo "::error::Databricks job completed with result: ${RESULT}"
+              exit 1
+            fi
+
+            if [[ "$LIFE_CYCLE" == "SKIPPED" ||
+                  "$LIFE_CYCLE" == "INTERNAL_ERROR" ]]; then
+              echo "::error::Databricks job ended in state: ${LIFE_CYCLE}"
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          echo "::error::Timed out waiting for Databricks job."
+          exit 1

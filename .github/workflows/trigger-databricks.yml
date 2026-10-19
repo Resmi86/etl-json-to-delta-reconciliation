@@ -42,6 +42,7 @@ jobs:
             --data "{\"job_id\": ${DATABRICKS_JOB_ID}}")
 
           RUN_ID=$(jq -er '.run_id' <<< "$RESPONSE")
+          echo "Databricks Run ID: ${RUN_ID}"
           echo "Databricks run started."
 
           for attempt in $(seq 1 60); do

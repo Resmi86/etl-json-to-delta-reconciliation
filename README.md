@@ -55,4 +55,4 @@ This project demonstrates practical PySpark data processing, nested JSON transfo
 
 ## CI/CD Execution
 
-GitHub Actions is configured to trigger the Databricks reconciliation job when changes are pushed to the `main` branch. The workflow monitors the job execution and reports success or failure based on the Databricks job result.
+GitHub Actions is configured to trigger the Databricks reconciliation job when changes are pushed to the `main` branch. 
